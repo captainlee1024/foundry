@@ -1,0 +1,4 @@
+# rust-toolchain.toml
+[toolchain]
+channel = "nightly"
+version = "2025-02-16"

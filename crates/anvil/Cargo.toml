@@ -14,7 +14,7 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "anvil"
+name = "my-anvil"
 path = "src/anvil.rs"
 required-features = ["cli"]
 
