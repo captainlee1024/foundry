@@ -1,0 +1,4 @@
+cargo build -Z unstable-options --artifact-dir ./my-foundry-bin
+
+and
+export PATH=$PATH:/xxx/xxx/your-path/foundry/my-foundry-bin
