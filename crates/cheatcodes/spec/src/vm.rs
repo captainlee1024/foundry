@@ -539,6 +539,14 @@ interface Vm {
     /// Stores a value to an address' storage slot.
     #[cheatcode(group = Evm, safety = Unsafe)]
     function store(address target, bytes32 slot, bytes32 value) external;
+        
+    /// Sets the value of a contract storage slot.
+    #[cheatcode(group = Evm, safety = Unsafe)]
+    function terrySetStorageAt(address target, bytes32 slot, bytes32 value) external;
+        
+    /// Gets a storage slot from an address.
+    #[cheatcode(group = Evm, safety = Safe)]
+    function terryGetStorageAt(address target, bytes32 slot) external view returns (bytes32 data);
 
     /// Marks the slots of an account and the account address as cold.
     #[cheatcode(group = Evm, safety = Unsafe, status = Experimental)]

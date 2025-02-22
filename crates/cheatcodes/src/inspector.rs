@@ -1189,6 +1189,12 @@ where {
     }
 }
 
+// 每次在发生evm call调用，即每次调用一个新合约的合约方法时，
+// 都会初始化一个新的interpreter,在实例化interpreter之后会调用initialize_interp inspector方法拦截
+// 对evm context进行一些修改
+// 需要设置成什么会在cheatcodes中先行设置，之后会将cheatcodes中的值应用到evm context中
+// TODO: 为什么只在每次初始化新的interpreter时调用initialize_interp方法
+// TODO: prank和deal是如何工作的
 impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
     #[inline]
     fn initialize_interp(&mut self, interpreter: &mut Interpreter, ecx: Ecx) {

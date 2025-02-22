@@ -78,6 +78,24 @@ impl Cheatcode for getMappingSlotAtCall {
             .and_then(|set| set.get(idx.saturating_to::<usize>()))
             .copied()
             .unwrap_or_default();
+        // state.mapping_slots
+        //     .as_ref()
+        //     .and_then(|slots| slots.keys.get(&result).copied())
+        //     .map_or_else(|| Ok(B256::ZERO.abi_encode()), |x| Ok(x.abi_encode()));
+        // 
+        // match state.mapping_slots.as_ref() {
+        //     Some(slots) => {
+        //         println!("Mapping slots found:");
+        //         for (address, mapping_slots) in slots.iter() {
+        //             println!("Address: {:x}, MappingSlots: {:#?}", address, mapping_slots);
+        //         }
+        //     }
+        //     None => {
+        //         println!("No mapping slots available (None)");
+        //     }
+        // }
+        
+        println!("getMappingSlotAtCall: U256 {}", U256::from_be_bytes(result.0));
         Ok(result.abi_encode())
     }
 }

@@ -1,5 +1,5 @@
 use alloy_primitives::Log;
-use alloy_sol_types::{SolEvent, SolInterface, SolValue};
+use alloy_sol_types::{SolEvent, SolEventInterface, SolInterface, SolValue};
 use foundry_common::{fmt::ConsoleFmt, ErrorExt};
 use foundry_evm_core::{abi::console, constants::HARDHAT_CONSOLE_ADDRESS, InspectorExt};
 use revm::{
@@ -66,7 +66,20 @@ impl InspectorExt for LogCollector {
 fn hh_to_ds(call: &console::hh::ConsoleCalls) -> Log {
     // Convert the parameters of the call to their string representation using `ConsoleFmt`.
     let msg = call.fmt(Default::default());
-    new_console_log(&msg)
+    let log = new_console_log(&msg);
+    // console::ds::ConsoleEvents::decode_log(log, false).ok().map(|decoded| decoded.to_string())
+    match console::ds::ConsoleEvents::decode_log(&log, false) {
+        Ok(decoded) => {
+            let decoded = decoded.to_string();
+            println!("[Terry Log] Decoded log: {}", decoded);
+            log
+        }
+        Err(_) => {
+            // Handle the error as needed, e.g., log it or return a default value.
+            println!("[Terry Log] Failed to decode log: \n{:#?}", log);
+            log
+        }
+    }
 }
 
 /// Creates a `console.log(string)` event.

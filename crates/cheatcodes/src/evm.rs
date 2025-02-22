@@ -32,6 +32,7 @@ mod fork;
 pub(crate) mod mapping;
 pub(crate) mod mock;
 pub(crate) mod prank;
+pub(crate) mod terry;
 
 /// Records storage slots reads and writes.
 #[derive(Clone, Debug, Default)]
@@ -171,9 +172,14 @@ impl Cheatcode for loadCall {
     fn apply_stateful(&self, ccx: &mut CheatsCtxt) -> Result {
         let Self { target, slot } = *self;
         ensure_not_precompile!(&target, ccx);
+        // 1. 加载目标账户的地址信息
         ccx.ecx.load_account(target)?;
+        // 2. 加载插槽信息
         let mut val = ccx.ecx.sload(target, slot.into())?;
 
+        // 3. 判断是冷账户还是热账户
+        // 4. 如果数据为空，并且开启了arbitrary_storage则空数据默认值是随机的，这里要随机生成随机值并复制给插槽
+        //  然后返回该随机数据
         if val.is_cold && val.data.is_zero() {
             if ccx.state.has_arbitrary_storage(&target) {
                 // If storage slot is untouched and load from a target with arbitrary storage,
@@ -500,11 +506,32 @@ impl Cheatcode for getBlobBaseFeeCall {
     }
 }
 
+// 以deal为例，理解cheatcode的实现 CheatsCtxt中的 CheatCodes,InnerEvmContext的作用与关系
+// - state, CheatsCtxt的state即CheatCodes, 这个是记录作弊码的状态
+// - ecx, InnerEvmContext, 这个是EVM执行的环境, 其中包含了
+//      - env, evn包含3部分，cfg, evm的配置内存限制等等，block 相关配置，tx相关配置
+//      - journaled_state, DB的cache层 是simulate的结果,包含了一部分storage的热数据和一些执行还未落块的修改
+//      - db, evm的storage层，对eth的读写都先经过journaled_state，没有时，journaled_state从db加载并缓存到journaled_state中
+//
+// 所以这些作弊码在实现时会分三种类型
+// - apply 只修改cheatcodes, 是不需要访问evm相关数据的，所以只需要传入CheatsCtxt.state即CheatCodes，就行作弊码状态的读取和修改
+// - apply_stateful, 修改CheatCodes，并且需要访问EVM storage数据的, 会传入整个CheatsCtxt, 其中会对evm执行环境进行访问和修改
+// - apply_ful, 需要访问executor，所以参数为CheatsCtxt和executor
+//      - executor, 这里的executor是指CheatcodesExecutor, 用于从对 Cheatcodes 的可变引用获取完整 revm：：Inspector 实例的 helper trait。 
+//        当 Inspector 本身需要对 Cheatcodes 状态进行可变访问并允许我们从 cheatcode 实现内部正确执行任意 EVM 帧时，这是必需的。
+// TODO: 1. 深入理解CheatcodesExecutor的作用
 impl Cheatcode for dealCall {
     fn apply_stateful(&self, ccx: &mut CheatsCtxt) -> Result {
+        // 1. 解析deal的参数 balance 和 address
         let Self { account: address, newBalance: new_balance } = *self;
+        // 2. 从evm storage加载account信息，包括：
+        //      - AccountInfo: balance, nonce, code_hase, code
+        //      - EVMStorage: 该address合约的状态数据
+        //      - AccountStatus
         let account = journaled_account(ccx.ecx, address)?;
+        // 3. 修改账户的balance
         let old_balance = std::mem::replace(&mut account.info.balance, new_balance);
+        // 4. 对deal操作做记录
         let record = DealRecord { address, old_balance, new_balance };
         ccx.state.eth_deals.push(record);
         Ok(Default::default())

@@ -62,6 +62,13 @@ mod toml;
 
 mod utils;
 
+// 作弊码会根据需求实现该trait中的其中一个
+// 其中apply方法是必须实现的，其他两个方法是可选的， apply不需要访问EVM数据
+// apply_stateful需要访问EVM数据,将作弊码应用到给定的CheatContext中
+// apply_full需要访问executor,将作弊码应用到给定的CheatContext和executor中
+//
+// VmSafe 是一个solidity interface, VM继承了VMSafe，以用于区分哪些函数是需要访问EVM数据，修改executor和context的
+// 最终的实现都在creates/cheatcodes/spec/src/vm.rs中
 /// Cheatcode implementation.
 pub(crate) trait Cheatcode: CheatcodeDef + DynCheatcode {
     /// Applies this cheatcode to the given state.
