@@ -543,10 +543,28 @@ interface Vm {
     /// Sets the value of a contract storage slot.
     #[cheatcode(group = Evm, safety = Unsafe)]
     function terrySetStorageAt(address target, bytes32 slot, bytes32 value) external;
+
+    /// (uint256 -> data)
+    #[cheatcode(group = Evm, safety = Unsafe)]
+    function terrySetMappingStorageAt(address target, uint256 slot, uint256 key, bytes32 value) external;
+
+    /// (address -> data)
+    #[cheatcode(group = Evm, safety = Unsafe)]
+    function terrySetMappingStorageAt(address target, uint256 slot, address key, bytes32 value) external;
+
         
     /// Gets a storage slot from an address.
     #[cheatcode(group = Evm, safety = Safe)]
     function terryGetStorageAt(address target, bytes32 slot) external view returns (bytes32 data);
+
+    /// (uint256 -> data)
+    #[cheatcode(group = Evm, safety = Safe)]
+    function terryGetMappingStorageAt(address target, uint256 slot, uint256 key) external view returns (bytes32 data);
+
+    /// (address -> data)
+    #[cheatcode(group = Evm, safety = Safe)]
+    function terryGetMappingStorageAt(address target, uint256 slot, address key) external view returns (bytes32 data);
+
 
     /// Marks the slots of an account and the account address as cold.
     #[cheatcode(group = Evm, safety = Unsafe, status = Experimental)]
