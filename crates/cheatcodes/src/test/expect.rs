@@ -256,7 +256,18 @@ impl Cheatcode for expectEmit_0Call {
         )
     }
 }
-
+// 以BankForTest.t.som为例，        
+// 1. vm.expectEmit(true, false, false, false);
+//          发出一个expect_emit, 检查次数默认为1, 会被拦截到这这里执行如下伙计
+//          第一次提交，添加到expected_emits列表里
+//         state.expected_emits.push_back((expected_emit, Default::default()));
+// 2. emit Bank.Deposit(x, 2); 
+//      提交期望的event, 会被拦截到inspector.log里面进行记录, 填充第一步创建的expectedEmit中期望的log数据
+// 3. 执行被测试合约，触发对应的event提交，被拦截到inspector.log里面，进行第一步创建的expected_emit的匹配检查
+//      检查成功回被标记为found
+//      没有成功count会+1，并等待下次的event提交再到inspector.log里匹配检查
+// 4. 最终在inspector.call_end()里面,推出本次test合约方法测试的call调用时检查expected_emit
+//      检查是否所有的expectedEmit是否全部found了，如果没有输出错误信息到终端
 impl Cheatcode for expectEmit_1Call {
     fn apply_stateful(&self, ccx: &mut CheatsCtxt) -> Result {
         let Self { checkTopic1, checkTopic2, checkTopic3, checkData, emitter } = *self;
@@ -412,6 +423,10 @@ impl Cheatcode for expectRevert_1Call {
     }
 }
 
+// vm.expectRevert("Not the owner of the NFT")
+// 会被记录到CheatsCtxt.CheatCodes.expected_revert中
+// ExpectedRevert包含了 revert的一些列数据，包括reason
+// expectRevert只能记录一个，在被触发或者清除后可以进行下一次revert
 impl Cheatcode for expectRevert_2Call {
     fn apply_stateful(&self, ccx: &mut CheatsCtxt) -> Result {
         let Self { revertData } = self;
@@ -767,6 +782,9 @@ pub(crate) fn handle_expect_emit(
     log: &alloy_primitives::Log,
     interpreter: &mut Interpreter,
 ) {
+    // 填充或者检查期望的event
+    //  - 在test函数里 vm.expectEmit后，emit Event是填充，即提交期望的event data  
+    //  - 在其他函数触发event提交时，检查是否需要check
     // Fill or check the expected emits.
     // We expect for emit checks to be filled as they're declared (from oldest to newest),
     // so we fill them and push them to the back of the queue.
@@ -777,39 +795,64 @@ pub(crate) fn handle_expect_emit(
     // First, we can return early if all events have been matched.
     // This allows a contract to arbitrarily emit more events than expected (additive behavior),
     // as long as all the previous events were matched in the order they were expected to be.
+    // 检查是否提交的expectEmit都匹配了
     if state.expected_emits.iter().all(|(expected, _)| expected.found) {
         return
     }
 
+    // 如果不是都匹配了
+    // 检查是否有ExpectedEmit没填充的，在vm.expectEmit之后会添加一个ExpectedEmit到cheatcodes里，但是
+    // 期望的logs没有填充，需要接下来的emit event即log来fill它
     let should_fill_logs = state.expected_emits.iter().any(|(expected, _)| expected.log.is_none());
+    // TODO: 注意
+    //        // 注意，因为每次check之后都会判断当前需要check 的expected event是否满足found
+    //         // 如果满足了就会push_back到队列末尾，所以队列头即index = 0永远是当前需要检查的第一个expectedEmit 
     let index_to_fill_or_check = if should_fill_logs {
         // If there's anything to fill, we start with the last event to match in the queue
         // (without taking into account events already matched).
+        // 如果需要填充expectedEmit的期望log data
+        // 并且按顺序从后往，在队列中第一个需要填充的地方开始
         state
             .expected_emits
             .iter()
             .position(|(emit, _)| emit.found)
+            // 这里的逻辑是，position统计一下有多少已经匹配过的
+            // 注意：匹配是按顺序的，所以默认是从后往前匹配，所以我们只需要找到已经found的数量,
+            // 然后-1就是需要fill的expectedEmit的index
             .unwrap_or(state.expected_emits.len())
             .saturating_sub(1)
     } else {
         // Otherwise, if all expected logs are filled, we start to check any unmatched event
         // in the declared order, so we start from the front (like a queue).
+        // 如果不需要fill,即所有的vm.expectedEmit,提交的expectedEmit都已经填充了预期的logs了
+        // 就从前面开始按vm.expectedEmit顺序check,使用本次提交的event 和预期logs对比
+        //
+        // 注意，因为每次check之后都会判断当前需要check 的expected event是否满足found
+        // 如果满足了就会push_back到队列末尾，所以队列头即index = 0永远是当前需要检查的第一个expectedEmit
         0
     };
 
+    // 如果是check获取第一个expectedEmit, 和count_map
+    // 如果是fill使用对应的index
     let (mut event_to_fill_or_check, mut count_map) = state
         .expected_emits
         .remove(index_to_fill_or_check)
         .expect("we should have an emit to fill or check");
 
+    // 判断对应index的 expectedEmit是否已经有logs
+    // 如果有，说明是check，取出期望的log
+    // 如果没有则是填充，判断是匿名event或者topic不为空则进行填充
     let Some(expected) = &event_to_fill_or_check.log else {
         // Unless the caller is trying to match an anonymous event, the first topic must be
         // filled.
         if event_to_fill_or_check.anonymous || !log.topics().is_empty() {
+            // 填充
             event_to_fill_or_check.log = Some(log.data.clone());
             // If we only filled the expected log then we put it back at the same position.
             state
                 .expected_emits
+                // 插入回expected_emits队列
+                // 这个时候count_map应该为空
                 .insert(index_to_fill_or_check, (event_to_fill_or_check, count_map));
         } else {
             interpreter.instruction_result = InstructionResult::Revert;
@@ -821,9 +864,11 @@ pub(crate) fn handle_expect_emit(
                 },
             };
         }
+        // 填充完返回
         return
     };
 
+    // 如果不是填充，起初期望的log 即上一步的expected
     // Increment/set `count` for `log.address` and `log.data`
     match count_map.entry(log.address) {
         Entry::Occupied(mut entry) => {
@@ -833,17 +878,40 @@ pub(crate) fn handle_expect_emit(
             log_count_map.insert(&log.data);
         }
         Entry::Vacant(entry) => {
+            // 如果是空的，初始化一个新的logCountMap
+            /*
+            pub struct LogCountMap {
+            checks: [bool; 5],
+            expected_log: RawLog,
+            map: HashMap<RawLog, u64>,
+            }
+                    Self {
+            checks: expected_emit.checks,
+            expected_log: expected_emit.log.clone().expect("log should be filled here"),
+            map: Default::default(),
+        }
+             */
+            // 
             let mut log_count_map = LogCountMap::new(&event_to_fill_or_check);
 
+            // 检查当前log是否和预期log想同
+            // 相同则插入到map中key为log, value为该想同log提交次数
+            // log每次插入，value +1
             if log_count_map.satisfies_checks(&log.data) {
                 log_count_map.insert(&log.data);
 
                 // Entry is only inserted if it satisfies the checks.
+                // 更新entry
                 entry.insert(log_count_map);
             }
         }
     }
 
+    // 如果时check, 则在插入后检查，当前log插入后是否已经满足expectedEmit 
+    // 判断当前log是否==预期的log
+    // log的地址是否==预期的地址
+    // countMap中预期地址下的该logs统计的命中次数是否已经>=expected_cound
+    // 如果满足，则found设置为true
     event_to_fill_or_check.found = || -> bool {
         if !checks_topics_and_data(event_to_fill_or_check.checks, expected, log) {
             return false
@@ -869,11 +937,14 @@ pub(crate) fn handle_expect_emit(
 
     // If we found the event, we can push it to the back of the queue
     // and begin expecting the next event.
+    // 如果当前expected已经found了，我们可以push_back放到队列后面，这样下次再取index = 0的就是下一个需要check的
+    // expected event
     if event_to_fill_or_check.found {
         state.expected_emits.push_back((event_to_fill_or_check, count_map));
     } else {
         // We did not match this event, so we need to keep waiting for the right one to
         // appear.
+        // 如果没有满足，则push_front到队列头，等待下次有event提交再判断
         state.expected_emits.push_front((event_to_fill_or_check, count_map));
     }
 }

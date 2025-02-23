@@ -17,6 +17,9 @@ use super::{
 ///
 /// 8192 bytes was arbitrarily chosen because it is long enough for return values up to 256 words in
 /// size.
+/// 对于某些作弊码，我们可能会在内部更改调用的状态，即在expectRevert中。
+/// Solidity将看到一个成功的调用，并尝试解码返回的数据。因此，我们需要用虚拟字节填充返回值，这样解码就不会失败。
+// 8192字节是任意选择的，因为它足够长，可以返回大小高达256个字的值。
 static DUMMY_CALL_OUTPUT: Bytes = Bytes::from_static(&[0u8; 8192]);
 
 /// Same reasoning as [DUMMY_CALL_OUTPUT], but for creates.
@@ -63,6 +66,7 @@ fn handle_revert(
     reverter: Option<&Address>,
 ) -> Result<(), Error> {
     // If expected reverter address is set then check it matches the actual reverter.
+    // 如果没有设置跳过该检查
     if let (Some(expected_reverter), Some(&actual_reverter)) = (revert_params.reverter(), reverter)
     {
         if expected_reverter != actual_reverter {
@@ -94,6 +98,7 @@ fn handle_revert(
     // Try decoding as known errors.
     actual_revert = decode_revert(actual_revert);
 
+    // 如果revert 和 cheatCodes记录的 revert reason相等，返回OK(())
     if actual_revert == expected_reason ||
         (is_cheatcode && memchr::memmem::find(&actual_revert, expected_reason).is_some())
     {
@@ -150,6 +155,9 @@ pub(crate) fn handle_expect_revert(
     retdata: Bytes,
     known_contracts: &Option<ContractsByArtifact>,
 ) -> Result<(Option<Address>, Bytes)> {
+    // 对于某些作弊码，我们可能会在内部更改调用的状态，即在expectRevert中。
+    // Solidity将看到一个成功的调用，并尝试解码返回的数据。因此，我们需要用虚拟字节填充返回值，这样解码就不会失败。
+    // 8192字节是任意选择的，因为它足够长，可以返回大小高达256个字的值。
     let success_return = || {
         if is_create {
             (Some(DUMMY_CREATE_ADDRESS), Bytes::new())
@@ -199,6 +207,7 @@ pub(crate) fn handle_expect_revert(
             }
         };
 
+        // 如果reason 和 reverter都匹配，那么返回错误
         match (reason_match, reverter_match) {
             (Some(true), Some(true)) => Err(fmt_err!(
                 "expected 0 reverts with reason: {}, from address: {}, but got one",
@@ -218,6 +227,8 @@ pub(crate) fn handle_expect_revert(
     } else {
         ensure!(!matches!(status, return_ok!()), "next call did not revert as expected");
 
+        // vm.expectRevert 设置count = 1
+        // 在这里判断
         handle_revert(
             is_cheatcode,
             expected_revert,

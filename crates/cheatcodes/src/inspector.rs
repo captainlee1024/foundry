@@ -1274,6 +1274,7 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
         }
     }
 
+    // 提交event会被拦截到这里执行
     fn log(&mut self, interpreter: &mut Interpreter, _ecx: Ecx, log: &Log) {
         if !self.expected_emits.is_empty() {
             expect::handle_expect_emit(self, log, interpreter);
@@ -1402,6 +1403,7 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
                         self.config.internal_expect_revert,
                         &expected_revert,
                         outcome.result.result,
+                        // 如果是revert 这里就是encoded reason data
                         outcome.result.output.clone(),
                         &self.config.available_artifacts,
                     ) {
@@ -1413,6 +1415,8 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
                         }
                         Ok((_, retdata)) => {
                             expected_revert.actual_count += 1;
+                            // 这里vm.expected都会设置为1
+                            // TODO：所以这里成功一次后 actual_count = count = 1?
                             if expected_revert.actual_count < expected_revert.count {
                                 self.expected_revert = Some(expected_revert.clone());
                             }
@@ -1506,16 +1510,23 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
             .any(|(expected, _)| expected.depth == ecx.journaled_state.depth()) &&
             // Ignore staticcalls
             !call.is_static;
+        
+        // expectedEmit 检查
         if should_check_emits {
             let expected_counts = self
                 .expected_emits
                 .iter()
+                // 遍历每个ExpectedEmitTracker, 检查提交的每个expectedEmit是否匹配到address对应日志里输出的log,是否都匹配了
+                // 每次被测试的合约emit event时都会被inspector.log拦截进行对比
+                // 如果满足，countMap中该event 即log +1
+                // 满足expectedEmit_count之后被标记为found
                 .filter_map(|(expected, count_map)| {
                     let count = match expected.address {
                         Some(emitter) => match count_map.get(&emitter) {
                             Some(log_count) => expected
                                 .log
                                 .as_ref()
+                                // 这里进行检查，如果匹配了,返回unchecked的日志数
                                 .map(|l| log_count.count(l))
                                 .unwrap_or_else(|| log_count.count_unchecked()),
                             None => 0,
@@ -1526,6 +1537,7 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
                         },
                     };
 
+                    // 如果查询的expected.count = logCountMap记录的命中次数，返回none
                     if count != expected.count {
                         Some((expected, count))
                     } else {
@@ -1535,12 +1547,15 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
                 .collect::<Vec<_>>();
 
             // Not all emits were matched.
+            // 判断一下是否所有的expectedEmit都found
             if self.expected_emits.iter().any(|(expected, _)| !expected.found) {
                 outcome.result.result = InstructionResult::Revert;
                 outcome.result.output = "log != expected log".abi_encode().into();
                 return outcome;
             }
 
+            // expected_counts统计的日志数不对等的expected
+            // 如果不为空，输出错误信息
             if !expected_counts.is_empty() {
                 let msg = if outcome.result.is_ok() {
                     let (expected, count) = expected_counts.first().unwrap();
@@ -1559,6 +1574,7 @@ impl Inspector<&mut dyn DatabaseExt> for Cheatcodes {
             // All emits were found, we're good.
             // Clear the queue, as we expect the user to declare more events for the next call
             // if they wanna match further events.
+            // 如果所有的expectedEmit都found, clear expected_emits队列所有数据
             self.expected_emits.clear()
         }
 
